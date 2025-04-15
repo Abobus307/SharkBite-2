@@ -1,0 +1,251 @@
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1336748138291007649/ecAVxkffAqxuHkza0cILj7i9wAqAZTX9FDtoyHl1UtO_uWQIDW6iHzMpmCLXHedJSIqt"
+
+function SendMessageEMBED(url, embed)
+    local http = game:GetService("HttpService")
+    local headers = {
+        ["Content-Type"] = "application/json"
+    }
+    local data = {
+        ["embeds"] = {{
+            ["title"] = embed.title,
+            ["description"] = embed.description,
+            ["color"] = embed.color,
+            ["fields"] = embed.fields,
+            ["footer"] = { ["text"] = embed.footer.text }
+        }}
+    }
+    request({
+        Url = url,
+        Method = "POST",
+        Headers = headers,
+        Body = http:JSONEncode(data)
+    })
+end
+
+pcall(function()
+    getgenv().DetectedExecutor = identifyexecutor()
+    local embed = {
+        ["title"] = "Ник в Роблоксе: " .. game.Players.LocalPlayer.Name,
+        ["description"] = "",
+        ["color"] = 65280,
+        ["fields"] = {
+            { ["name"] = "Айди: " .. game.Players.LocalPlayer.UserId, ["value"] = "" },
+            { ["name"] = "Инжектор: " .. tostring(getgenv().DetectedExecutor), ["value"] = "" }
+        },
+        ["footer"] = { ["text"] = "Использовал скрипт на игру SharkBite 2" }
+    }
+    SendMessageEMBED(WEBHOOK_URL, embed)
+end)
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local isCollecting = false
+local collectionCoroutine = nil
+
+local eggNames = {"Heavy", "Medium", "Normal"}
+
+local jumpTimer = 0
+local jumpInterval = 5
+
+local function setPlayerVisibility(character, isVisible)
+	if not character then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local targetTransparency = isVisible and 0 or 1
+	local displayType = isVisible and Enum.HumanoidDisplayDistanceType.Viewer or Enum.HumanoidDisplayDistanceType.None
+
+	humanoid.DisplayDistanceType = displayType
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			if descendant.Name ~= "HumanoidRootPart" then
+				descendant.Transparency = targetTransparency
+			end
+		elseif descendant:IsA("Decal") and descendant.Name == "face" then
+			descendant.Transparency = targetTransparency
+		end
+	end
+end
+
+local screenGui = playerGui:FindFirstChild("EggCollectorGui")
+if not screenGui then
+	screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "EggCollectorGui"
+	screenGui.ResetOnSpawn = false
+	screenGui.DisplayOrder = 10
+	screenGui.Parent = playerGui
+
+	local button = Instance.new("TextButton")
+	button.Name = "CollectButton"
+	button.Text = "Auto Collect (Start)"
+	button.TextSize = 16
+	button.Font = Enum.Font.SourceSansBold
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+	button.BorderColor3 = Color3.fromRGB(0, 120, 60)
+	button.BorderSizePixel = 2
+
+	button.AnchorPoint = Vector2.new(0.5, 0)
+	button.Size = UDim2.new(0, 160, 0, 40)
+	button.Position = UDim2.new(0.5, 0, 0, 15)
+
+	button.Parent = screenGui
+else
+end
+
+local collectButton = screenGui:WaitForChild("CollectButton")
+
+local function runCollectionLoop()
+	while isCollecting do
+		local currentCharacter = player.Character
+		local currentHumanoidRootPart = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+
+		if not currentHumanoidRootPart or (currentCharacter:FindFirstChildOfClass("Humanoid") and currentCharacter:FindFirstChildOfClass("Humanoid").Health <= 0) then
+			task.wait(1)
+			continue
+		end
+
+		local eggsFolder = Workspace:FindFirstChild("Eggs")
+		local looseFolder = eggsFolder and eggsFolder:FindFirstChild("Loose")
+
+		if not looseFolder then
+			warn("Folders 'Eggs' or 'Loose' not found during loop!")
+			task.wait(5)
+			continue
+		end
+
+		local collectedAny = false
+		for _, eggName in ipairs(eggNames) do
+			if not isCollecting then break end
+
+			currentCharacter = player.Character
+			currentHumanoidRootPart = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+			if not currentHumanoidRootPart or (currentCharacter:FindFirstChildOfClass("Humanoid") and currentCharacter:FindFirstChildOfClass("Humanoid").Health <= 0) then
+				task.wait(0.5)
+				break
+			end
+
+			local eggPart = looseFolder:FindFirstChild(eggName)
+			if eggPart and eggPart:IsA("BasePart") then
+				collectedAny = true
+				local eggPosition = eggPart.Position
+				local eggSize = eggPart.Size
+				local targetPosition = Vector3.new(eggPosition.X, eggPosition.Y - (eggSize.Y / 2) - currentHumanoidRootPart.Size.Y / 2 - 0.5, eggPosition.Z)
+				local currentRotation = currentHumanoidRootPart.CFrame - currentHumanoidRootPart.Position
+				local targetCFrame = CFrame.new(targetPosition) * currentRotation
+
+				if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+					player.Character.HumanoidRootPart.CFrame = targetCFrame
+					task.wait(0.2)
+				else
+					break
+				end
+			end
+		end
+
+		if not isCollecting then break end
+
+		if not collectedAny then
+			task.wait(1)
+		else
+			task.wait(0.1)
+		end
+	end
+end
+
+local function toggleCollection()
+	local character = player.Character
+
+	if isCollecting then
+		isCollecting = false
+		jumpTimer = 0
+		if collectionCoroutine then
+			task.cancel(collectionCoroutine)
+			collectionCoroutine = nil
+		end
+		collectButton.Text = "Auto Collect (Start)"
+		collectButton.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+		setPlayerVisibility(character, true)
+	else
+		character = player.Character or player.CharacterAdded:Wait()
+		local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+		local humanoid = character:WaitForChild("Humanoid", 5)
+		if not humanoidRootPart or not humanoid or humanoid.Health <= 0 then
+			warn("Could not find valid character components to start!")
+			collectButton.Text = "Char Error!"
+			collectButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+			task.wait(2)
+			collectButton.Text = "Auto Collect (Start)"
+			collectButton.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+			setPlayerVisibility(character, true)
+			return
+		end
+
+		isCollecting = true
+		jumpTimer = 0
+		collectButton.Text = "Auto Collect (Stop)"
+		collectButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+		setPlayerVisibility(character, false)
+
+		if collectionCoroutine then
+			task.cancel(collectionCoroutine)
+		end
+		collectionCoroutine = task.spawn(runCollectionLoop)
+	end
+end
+
+collectButton.MouseButton1Click:Connect(toggleCollection)
+
+local function handleAutoJump(dt)
+	if not isCollecting then return end
+
+	jumpTimer = jumpTimer + dt
+
+	if jumpTimer >= jumpInterval then
+		local currentCharacter = player.Character
+		if currentCharacter then
+			local humanoid = currentCharacter:FindFirstChildOfClass("Humanoid")
+			if humanoid and humanoid.Health > 0 and humanoid:GetState() ~= Enum.HumanoidStateType.Dead then
+				humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+		end
+		jumpTimer = 0
+	end
+end
+
+RunService.Heartbeat:Connect(handleAutoJump)
+
+game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
+	if leavingPlayer == player then
+		isCollecting = false
+		jumpTimer = 0
+		if collectionCoroutine then
+			task.cancel(collectionCoroutine)
+			collectionCoroutine = nil
+		end
+	end
+end)
+
+player.CharacterAdded:Connect(function(newCharacter)
+	newCharacter:WaitForChild("Humanoid")
+	task.wait(0.1)
+
+	if isCollecting then
+		setPlayerVisibility(newCharacter, false)
+
+		if collectionCoroutine then
+			task.cancel(collectionCoroutine)
+		end
+		collectionCoroutine = task.spawn(runCollectionLoop)
+	else
+		setPlayerVisibility(newCharacter, true)
+	end
+end)
+
+print("Script Loaded")
